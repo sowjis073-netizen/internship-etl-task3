@@ -1,0 +1,93 @@
+import pandas as pd
+import numpy as np
+import joblib
+import uvicorn
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from fastapi import FastAPI, Depends, HTTPException, status
+from pydantic import BaseModel
+MODEL_PATH = 'churn_model.pkl'
+def train_and_save_model():
+    """
+    Trains a Logistic Regression model on the Telco Churn dataset
+    and saves the trained pipeline to disk.
+    """
+    print("Model file not found. Training a new model...")
+    try:
+        df = pd.read_csv('Telco-Customer-Churn.csv')
+    except FileNotFoundError:
+        raise FileNotFoundError("The 'Telco-Customer-Churn.csv' file was not found. Please download it.")
+    df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+    df.dropna(inplace=True)
+    X = df.drop(['customerID', 'Churn'], axis=1)
+    y = df['Churn'].apply(lambda x: 1 if x == 'Yes' else 0)
+    categorical_features = X.select_dtypes(include=['object']).columns
+    numerical_features = X.select_dtypes(include=['number']).columns
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', StandardScaler(), numerical_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ])
+    model_pipeline = Pipeline(steps=[
+        ('preprocessor', preprocessor),
+        ('classifier', LogisticRegression(max_iter=1000, random_state=42))
+    ])
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model_pipeline.fit(X_train, y_train)
+    joblib.dump(model_pipeline, MODEL_PATH)
+    print("Model trained successfully and saved as 'churn_model.pkl'.")
+if not os.path.exists(MODEL_PATH):
+    train_and_save_model()
+class Customer(BaseModel):
+    gender: str
+    SeniorCitizen: int
+    Partner: str
+    Dependents: str
+    tenure: int
+    PhoneService: str
+    MultipleLines: str
+    InternetService: str
+    OnlineSecurity: str
+    OnlineBackup: str
+    DeviceProtection: str
+    TechSupport: str
+    StreamingTV: str
+    StreamingMovies: str
+    Contract: str
+    PaperlessBilling: str
+    PaymentMethod: str
+    MonthlyCharges: float
+    TotalCharges: float
+try:
+    model = joblib.load(MODEL_PATH)
+except FileNotFoundError:
+    print("Model file not found. Exiting. Please run the script to train the model first.")
+    exit()
+app = FastAPI(
+    title="Customer Churn Prediction API",
+    description="A simple API to predict customer churn based on Telco data."
+)
+@app.get("/", status_code=status.HTTP_200_OK)
+def read_root():
+    return {"message": "Welcome to the Customer Churn Prediction API! Go to /docs to see the API endpoints."}
+@app.post("/predict_churn", status_code=status.HTTP_200_OK)
+def predict_churn(customer: Customer):
+    """
+    Predicts whether a customer will churn based on their details.
+    """
+    try:
+        input_df = pd.DataFrame([customer.dict()])
+        prediction_prob = model.predict_proba(input_df)[0][1]
+        prediction = "Yes" if prediction_prob >= 0.5 else "No"
+        return {
+            "prediction": prediction,
+            "churn_probability": round(prediction_prob, 4)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)

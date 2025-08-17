@@ -1,0 +1,190 @@
+import pandas as pd
+import numpy as np
+import joblib
+import uvicorn
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from fastapi import FastAPI, Request, Form, HTTPException, status
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
+from typing import Optional
+MODEL_PATH = 'churn_model.pkl'
+def train_and_save_model():
+    """
+    Trains a Logistic Regression model on the Telco Churn dataset
+    and saves the trained pipeline to disk.
+    """
+    print("Model file not found. Training a new model...")
+    try:
+        df = pd.read_csv('Telco-Customer-Churn.csv')
+    except FileNotFoundError:
+        raise FileNotFoundError("The 'Telco-Customer-Churn.csv' file was not found. Please download it.")
+    df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+    df.dropna(inplace=True)
+    X = df.drop(['customerID', 'Churn'], axis=1)
+    y = df['Churn'].apply(lambda x: 1 if x == 'Yes' else 0)
+    categorical_features = X.select_dtypes(include=['object']).columns
+    numerical_features = X.select_dtypes(include=['number']).columns
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', StandardScaler(), numerical_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ])
+    model_pipeline = Pipeline(steps=[
+        ('preprocessor', preprocessor),
+        ('classifier', LogisticRegression(max_iter=1000, random_state=42))
+    ])
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model_pipeline.fit(X_train, y_train)
+    joblib.dump(model_pipeline, MODEL_PATH)
+    print("Model trained successfully and saved as 'churn_model.pkl'.")
+if not os.path.exists(MODEL_PATH):
+    train_and_save_model()
+class Customer(BaseModel):
+    gender: str
+    SeniorCitizen: int
+    Partner: str
+    Dependents: str
+    tenure: int
+    PhoneService: str
+    MultipleLines: str
+    InternetService: str
+    OnlineSecurity: str
+    OnlineBackup: str
+    DeviceProtection: str
+    TechSupport: str
+    StreamingTV: str
+    StreamingMovies: str
+    Contract: str
+    PaperlessBilling: str
+    PaymentMethod: str
+    MonthlyCharges: float
+    TotalCharges: float
+try:
+    model = joblib.load(MODEL_PATH)
+except FileNotFoundError:
+    raise FileNotFoundError("Model file not found. Exiting.")
+app = FastAPI(
+    title="Customer Churn Predictor",
+    description="An end-to-end demo of a machine learning model deployed with FastAPI."
+)
+templates = Jinja2Templates(directory="templates")
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Customer Churn Predictor</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        .form-container { max-width: 600px; margin: auto; padding: 2em; border: 1px solid #ccc; border-radius: 8px; }
+        .result-box { margin-top: 1.5em; padding: 1em; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; }
+        label { display: block; margin-top: 0.5em; }
+        input, select { width: 100%; padding: 0.5em; margin-top: 0.2em; }
+        button { margin-top: 1em; padding: 0.7em 1.5em; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        <h1>Customer Churn Predictor</h1>
+        <p>Enter customer details to predict if they will churn.</p>
+        <form method="post" action="/">
+            <label for="gender">Gender:</label><select name="gender" required><option>Male</option><option>Female</option></select>
+            <label for="SeniorCitizen">Senior Citizen:</label><select name="SeniorCitizen" required><option value="0">No</option><option value="1">Yes</option></select>
+            <label for="Partner">Partner:</label><select name="Partner" required><option>Yes</option><option>No</option></select>
+            <label for="Dependents">Dependents:</label><select name="Dependents" required><option>Yes</option><option>No</option></select>
+            <label for="tenure">Tenure (months):</label><input type="number" name="tenure" required min="0">
+            <label for="PhoneService">Phone Service:</label><select name="PhoneService" required><option>Yes</option><option>No</option></select>
+            <label for="MultipleLines">Multiple Lines:</label><select name="MultipleLines" required><option>No phone service</option><option>Yes</option><option>No</option></select>
+            <label for="InternetService">Internet Service:</label><select name="InternetService" required><option>DSL</option><option>Fiber optic</option><option>No</option></select>
+            <label for="OnlineSecurity">Online Security:</label><select name="OnlineSecurity" required><option>No internet service</option><option>Yes</option><option>No</option></select>
+            <label for="OnlineBackup">Online Backup:</label><select name="OnlineBackup" required><option>No internet service</option><option>Yes</option><option>No</option></select>
+            <label for="DeviceProtection">Device Protection:</label><select name="DeviceProtection" required><option>No internet service</option><option>Yes</option><option>No</option></select>
+            <label for="TechSupport">Tech Support:</label><select name="TechSupport" required><option>No internet service</option><option>Yes</option><option>No</option></select>
+            <label for="StreamingTV">Streaming TV:</label><select name="StreamingTV" required><option>No internet service</option><option>Yes</option><option>No</option></select>
+            <label for="StreamingMovies">Streaming Movies:</label><select name="StreamingMovies" required><option>No internet service</option><option>Yes</option><option>No</option></select>
+            <label for="Contract">Contract:</label><select name="Contract" required><option>Month-to-month</option><option>One year</option><option>Two year</option></select>
+            <label for="PaperlessBilling">Paperless Billing:</label><select name="PaperlessBilling" required><option>Yes</option><option>No</option></select>
+            <label for="PaymentMethod">Payment Method:</label><select name="PaymentMethod" required><option>Electronic check</option><option>Mailed check</option><option>Bank transfer (automatic)</option><option>Credit card (automatic)</option></select>
+            <label for="MonthlyCharges">Monthly Charges:</label><input type="number" step="0.01" name="MonthlyCharges" required>
+            <label for="TotalCharges">Total Charges:</label><input type="number" step="0.01" name="TotalCharges" required>
+            <button type="submit">Predict</button>
+        </form>
+        {% if result %}
+        <div class="result-box">
+            <h3>Prediction Result:</h3>
+            <p><strong>Predicted Churn:</strong> {{ result.prediction }}</p>
+            <p><strong>Churn Probability:</strong> {{ "%.4f"|format(result.churn_probability) }}</p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+if not os.path.exists("templates"):
+    os.makedirs("templates")
+with open("templates/index.html", "w") as f:
+    f.write(HTML_TEMPLATE)
+@app.get("/", response_class=HTMLResponse)
+async def get_form(request: Request):
+    """Serve the HTML form for user input."""
+    return templates.TemplateResponse("index.html", {"request": request})
+@app.post("/", response_class=HTMLResponse)
+async def post_form(request: Request,
+                    gender: str = Form(...),
+                    SeniorCitizen: int = Form(...),
+                    Partner: str = Form(...),
+                    Dependents: str = Form(...),
+                    tenure: int = Form(...),
+                    PhoneService: str = Form(...),
+                    MultipleLines: str = Form(...),
+                    InternetService: str = Form(...),
+                    OnlineSecurity: str = Form(...),
+                    OnlineBackup: str = Form(...),
+                    DeviceProtection: str = Form(...),
+                    TechSupport: str = Form(...),
+                    StreamingTV: str = Form(...),
+                    StreamingMovies: str = Form(...),
+                    Contract: str = Form(...),
+                    PaperlessBilling: str = Form(...),
+                    PaymentMethod: str = Form(...),
+                    MonthlyCharges: float = Form(...),
+                    TotalCharges: float = Form(...)):
+    """Handle form submission and return prediction."""
+    try:
+        input_data = {
+            'gender': gender, 'SeniorCitizen': SeniorCitizen, 'Partner': Partner, 'Dependents': Dependents,
+            'tenure': tenure, 'PhoneService': PhoneService, 'MultipleLines': MultipleLines,
+            'InternetService': InternetService, 'OnlineSecurity': OnlineSecurity, 'OnlineBackup': OnlineBackup,
+            'DeviceProtection': DeviceProtection, 'TechSupport': TechSupport, 'StreamingTV': StreamingTV,
+            'StreamingMovies': StreamingMovies, 'Contract': Contract, 'PaperlessBilling': PaperlessBilling,
+            'PaymentMethod': PaymentMethod, 'MonthlyCharges': MonthlyCharges, 'TotalCharges': TotalCharges
+        }
+        input_df = pd.DataFrame([input_data])
+        prediction_prob = model.predict_proba(input_df)[0][1]
+        prediction = "Yes" if prediction_prob >= 0.5 else "No"
+        result = {"prediction": prediction, "churn_probability": prediction_prob}
+        return templates.TemplateResponse("index.html", {"request": request, "result": result})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/predict", status_code=status.HTTP_200_OK)
+def predict_churn_api(customer: Customer):
+    """
+    API endpoint for churn prediction. Accepts a JSON payload and returns a prediction.
+    """
+    try:
+        input_df = pd.DataFrame([customer.dict()])
+        prediction_prob = model.predict_proba(input_df)[0][1]
+        prediction = "Yes" if prediction_prob >= 0.5 else "No"
+        return {
+            "prediction": prediction,
+            "churn_probability": round(prediction_prob, 4)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)

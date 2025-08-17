@@ -1,0 +1,76 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+def run_data_science_project():
+    """
+    Executes a full data science project pipeline for customer churn prediction.
+    """
+    print("### 1. Data Loading and Initial Exploration ###")
+    try:
+        df = pd.read_csv('Telco-Customer-Churn.csv')
+    except FileNotFoundError:
+        print("Error: The 'Telco-Customer-Churn.csv' file was not found.")
+        print("Please download the dataset and place it in the same directory as the script.")
+        return
+    df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+    df.dropna(inplace=True)
+    print("\nInitial 5 rows of the dataset:")
+    print(df.head())
+    print("\nData Information:")
+    df.info()
+    print("\n\n### 2. Exploratory Data Analysis (EDA) ###")
+    print("\nChurn Distribution:")
+    churn_counts = df['Churn'].value_counts()
+    print(churn_counts)
+    plt.figure(figsize=(6, 4))
+    sns.countplot(x='Churn', data=df)
+    plt.title('Churn Distribution')
+    plt.show()
+    print("\nRelationship between Monthly Charges and Total Charges:")
+    sns.scatterplot(x='MonthlyCharges', y='TotalCharges', hue='Churn', data=df)
+    plt.title('Monthly Charges vs Total Charges by Churn')
+    plt.show()
+    print("\n\n### 3. Data Preprocessing ###")
+    X = df.drop(['customerID', 'Churn'], axis=1)
+    y = df['Churn'].apply(lambda x: 1 if x == 'Yes' else 0)
+    categorical_features = X.select_dtypes(include=['object']).columns
+    numerical_features = X.select_dtypes(include=['number']).columns
+    numerical_transformer = StandardScaler()
+    categorical_transformer = OneHotEncoder(handle_unknown='ignore')
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numerical_transformer, numerical_features),
+            ('cat', categorical_transformer, categorical_features)
+        ])
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    print(f"\nTraining set size: {len(X_train)} samples")
+    print(f"Testing set size: {len(X_test)} samples")
+    print("\n\n### 4. Model Training ###")
+    model_pipeline = Pipeline(steps=[('preprocessor', preprocessor),
+                                     ('classifier', LogisticRegression(max_iter=1000, random_state=42))])
+
+    model_pipeline.fit(X_train, y_train)
+    print("Model training complete.")
+    print("\n\n### 5. Model Evaluation ###")
+    y_pred = model_pipeline.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"Accuracy on test set: {accuracy:.4f}")
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred))
+    conf_matrix = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=['No Churn', 'Churn'], yticklabels=['No Churn', 'Churn'])
+    plt.title('Confusion Matrix')
+    plt.xlabel('Predicted Label')
+    plt.ylabel('True Label')
+    plt.show()
+if __name__ == "__main__":
+    run_data_science_project()
